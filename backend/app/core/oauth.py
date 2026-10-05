@@ -96,6 +96,7 @@ class OAuthService:
                     "redirect_uri": redirect_uri,
                 },
             )
+            
             if token_resp.status_code != 200:
                 return None
             token_data = token_resp.json()

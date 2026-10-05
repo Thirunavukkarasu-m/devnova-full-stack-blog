@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { authApi } from "../services/authApi";
 import { getErrorMessage } from "../services/api";
@@ -17,21 +17,29 @@ export const Login = () => {
   const [oauthLoading, setOauthLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const oauthHandledRef = useRef(false);
+
   const searchParams = new URLSearchParams(location.search);
   const redirectPath = searchParams.get("redirect") || "/dashboard";
   const oauthCode = searchParams.get("code");
-  const oauthProvider = searchParams.get("provider");
 
-  // Handle OAuth callback if code is present in URL
+  const oauthProvider =
+    searchParams.get("provider") ||
+    sessionStorage.getItem("oauth_provider") ||
+    "google";
+
   useEffect(() => {
-    if (oauthCode) {
-      handleOAuthCallback(oauthCode, oauthProvider || "google");
+    if (oauthCode && !oauthHandledRef.current) {
+      oauthHandledRef.current = true;
+      handleOAuthCallback(oauthCode, oauthProvider);
     }
-  }, [oauthCode]);
+  }, [oauthCode, oauthProvider]);
 
   useEffect(() => {
     if (isAuthenticated && !oauthCode) {
-      navigate(user?.role === "ADMIN" ? "/admin" : "/dashboard", { replace: true });
+      navigate(user?.role === "ADMIN" ? "/admin" : "/dashboard", {
+        replace: true,
+      });
     }
   }, [isAuthenticated, user, navigate, oauthCode]);
 
@@ -39,15 +47,20 @@ export const Login = () => {
     try {
       setOauthLoading(true);
       setError("");
-      const currentUrl = window.location.origin + "/login";
-      let data;
-      if (provider === "github") {
-        data = await authApi.githubCallback(code, currentUrl);
-      } else {
-        data = await authApi.googleCallback(code, currentUrl);
-      }
+
+      const redirectUri = window.location.origin + "/login";
+
+      const data =
+        provider === "github"
+          ? await authApi.githubCallback(code, redirectUri)
+          : await authApi.googleCallback(code, redirectUri);
+
       setAuthData(data);
-      navigate(data.user.role === "ADMIN" ? "/admin" : "/dashboard", { replace: true });
+      sessionStorage.removeItem("oauth_provider");
+
+      navigate(data.user.role === "ADMIN" ? "/admin" : "/dashboard", {
+        replace: true,
+      });
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -57,15 +70,20 @@ export const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     setError("");
     setLoading(true);
+
     try {
       const loggedUser = await login({
         username_or_email: identifier.trim(),
         password,
         remember_me: rememberMe,
       });
-      navigate(loggedUser.role === "ADMIN" ? "/admin" : redirectPath, { replace: true });
+
+      navigate(loggedUser.role === "ADMIN" ? "/admin" : redirectPath, {
+        replace: true,
+      });
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -77,9 +95,12 @@ export const Login = () => {
     try {
       setOauthLoading(true);
       setError("");
-      const currentUrl = window.location.origin + "/login";
-      const { url } = await authApi.getGoogleAuthUrl(currentUrl);
-      // In development when credentials are xxxx, backend simulation handles direct code exchange
+
+      sessionStorage.setItem("oauth_provider", "google");
+
+      const redirectUri = window.location.origin + "/login";
+      const { url } = await authApi.getGoogleAuthUrl(redirectUri);
+
       window.location.href = url;
     } catch (err) {
       setError(getErrorMessage(err));
@@ -91,8 +112,12 @@ export const Login = () => {
     try {
       setOauthLoading(true);
       setError("");
-      const currentUrl = window.location.origin + "/login";
-      const { url } = await authApi.getGithubAuthUrl(currentUrl);
+
+      sessionStorage.setItem("oauth_provider", "github");
+
+      const redirectUri = window.location.origin + "/login";
+      const { url } = await authApi.getGithubAuthUrl(redirectUri);
+
       window.location.href = url;
     } catch (err) {
       setError(getErrorMessage(err));
@@ -103,9 +128,11 @@ export const Login = () => {
   return (
     <div className="container py-5 my-auto" style={{ maxWidth: "460px" }}>
       <div className="dev-card p-4 p-sm-5 shadow-lg">
-        {/* Brand Header */}
         <div className="text-center mb-4">
-          <Link to="/" className="d-inline-flex align-items-center gap-2 text-decoration-none mb-3">
+          <Link
+            to="/"
+            className="d-inline-flex align-items-center gap-2 text-decoration-none mb-3"
+          >
             <div
               className="d-flex align-items-center justify-content-center text-white fw-bold shadow-sm"
               style={{
@@ -118,18 +145,21 @@ export const Login = () => {
               <i className="bi bi-code-slash fs-4"></i>
             </div>
           </Link>
+
           <h3 className="fw-bold mb-1">Welcome back to DevNova</h3>
           <p className="text-muted small">Explore. Learn. Build.</p>
         </div>
 
         {error && (
-          <div className="alert alert-danger py-2 px-3 small d-flex align-items-center gap-2 mb-4" role="alert">
+          <div
+            className="alert alert-danger py-2 px-3 small d-flex align-items-center gap-2 mb-4"
+            role="alert"
+          >
             <i className="bi bi-exclamation-triangle-fill flex-shrink-0"></i>
             <div>{error}</div>
           </div>
         )}
 
-        {/* OAuth Buttons */}
         <div className="d-flex flex-column gap-2 mb-4">
           <button
             type="button"
@@ -138,7 +168,9 @@ export const Login = () => {
             className="btn btn-outline-dev py-2 d-flex align-items-center justify-content-center gap-2 w-100"
           >
             <i className="bi bi-google text-danger"></i>
-            <span>Continue with Google</span>
+            <span>
+              {oauthLoading ? "Connecting..." : "Continue with Google"}
+            </span>
           </button>
 
           <button
@@ -148,12 +180,15 @@ export const Login = () => {
             className="btn btn-outline-dev py-2 d-flex align-items-center justify-content-center gap-2 w-100"
           >
             <i className="bi bi-github"></i>
-            <span>Continue with GitHub</span>
+            <span>
+              {oauthLoading ? "Connecting..." : "Continue with GitHub"}
+            </span>
           </button>
         </div>
 
         <div className="position-relative text-center my-4">
           <hr style={{ borderColor: "var(--dn-border)" }} />
+
           <span
             className="position-absolute top-50 start-50 translate-middle px-3 small text-muted"
             style={{ backgroundColor: "var(--dn-surface-card)" }}
@@ -162,14 +197,20 @@ export const Login = () => {
           </span>
         </div>
 
-        {/* Traditional Login Form */}
         <form onSubmit={handleSubmit}>
           <div className="mb-3">
-            <label className="form-label small fw-semibold">Email or Username</label>
+            <label className="form-label small fw-semibold">
+              Email or Username
+            </label>
+
             <div className="input-group">
-              <span className="input-group-text bg-transparent" style={{ borderColor: "var(--dn-border)" }}>
+              <span
+                className="input-group-text bg-transparent"
+                style={{ borderColor: "var(--dn-border)" }}
+              >
                 <i className="bi bi-person text-muted"></i>
               </span>
+
               <input
                 type="text"
                 required
@@ -184,15 +225,27 @@ export const Login = () => {
 
           <div className="mb-3">
             <div className="d-flex justify-content-between align-items-center mb-1">
-              <label className="form-label small fw-semibold mb-0">Password</label>
-              <Link to="/forgot-password" style={{ fontSize: "0.75rem" }} className="text-decoration-none">
+              <label className="form-label small fw-semibold mb-0">
+                Password
+              </label>
+
+              <Link
+                to="/forgot-password"
+                className="text-decoration-none"
+                style={{ fontSize: "0.75rem" }}
+              >
                 Forgot password?
               </Link>
             </div>
+
             <div className="input-group">
-              <span className="input-group-text bg-transparent" style={{ borderColor: "var(--dn-border)" }}>
+              <span
+                className="input-group-text bg-transparent"
+                style={{ borderColor: "var(--dn-border)" }}
+              >
                 <i className="bi bi-lock text-muted"></i>
               </span>
+
               <input
                 type={showPassword ? "text" : "password"}
                 required
@@ -202,13 +255,16 @@ export const Login = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 style={{ borderColor: "var(--dn-border)" }}
               />
+
               <button
                 type="button"
                 className="input-group-text bg-transparent text-muted border-start-0"
                 onClick={() => setShowPassword(!showPassword)}
                 style={{ borderColor: "var(--dn-border)" }}
               >
-                <i className={`bi ${showPassword ? "bi-eye-slash" : "bi-eye"}`}></i>
+                <i
+                  className={`bi ${showPassword ? "bi-eye-slash" : "bi-eye"}`}
+                ></i>
               </button>
             </div>
           </div>
@@ -221,7 +277,11 @@ export const Login = () => {
               checked={rememberMe}
               onChange={(e) => setRememberMe(e.target.checked)}
             />
-            <label className="form-check-label small text-muted" htmlFor="rememberMe">
+
+            <label
+              className="form-check-label small text-muted"
+              htmlFor="rememberMe"
+            >
               Remember me on this device
             </label>
           </div>
@@ -233,7 +293,10 @@ export const Login = () => {
           >
             {loading ? (
               <>
-                <span className="spinner-border spinner-border-sm" role="status"></span>
+                <span
+                  className="spinner-border spinner-border-sm"
+                  role="status"
+                ></span>
                 <span>Signing in...</span>
               </>
             ) : (
@@ -244,16 +307,28 @@ export const Login = () => {
 
         <div className="text-center mt-4 text-muted small">
           Don't have an account?{" "}
-          <Link to="/register" className="fw-semibold text-decoration-none text-primary">
+          <Link
+            to="/register"
+            className="fw-semibold text-decoration-none text-primary"
+          >
             Sign up now
           </Link>
         </div>
 
-        {/* Demo Credentials Helper Pill */}
-        <div className="mt-4 p-3 rounded-3 dev-card border-dashed small text-muted" style={{ fontSize: "0.75rem" }}>
+        <div
+          className="mt-4 p-3 rounded-3 dev-card border-dashed small text-muted"
+          style={{ fontSize: "0.75rem" }}
+        >
           <div className="fw-bold mb-1 text-body">Demo Accounts:</div>
-          <div>Admin: <code>admin@devnova.io</code> / <code>Password@123</code></div>
-          <div>Author: <code>alex.rivera@devnova.io</code> / <code>Password@123</code></div>
+
+          <div>
+            Admin: <code>admin@devnova.io</code> / <code>Password@123</code>
+          </div>
+
+          <div>
+            Author: <code>alex.rivera@devnova.io</code> /{" "}
+            <code>Password@123</code>
+          </div>
         </div>
       </div>
     </div>
